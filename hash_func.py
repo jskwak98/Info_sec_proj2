@@ -1,4 +1,4 @@
-
+from random import getrandbits, seed
 
 class HashFinder:
     def __init__(self, t=5):
@@ -6,11 +6,52 @@ class HashFinder:
         self.t = t
         self.int_lookup = b'\x00\x01\x02\x03\x04\x05\x06'
 
-    def set_m(self, m):
-        self.m = bytearray(32)
-        encoded = m.encode()
-        for i in range(len(encoded)):
-            self.m[i] = encoded[i]
+    def find(self, sd=17, pt=True):
+        seed(sd)
+        # make original one
+        self.makeinput()
+        if pt:
+            print("Message : ", end='')
+            self.hexprint(self.m)
+        o = self.hash()
+        if pt:
+            print("Hash : ", end='')
+            self.hexprint(o)
+
+        # make intermediate output
+        self.tweak()
+        o_i = self.hash()
+
+        # change B and make collision pair
+        self.change_B(o, o_i)
+        if pt:
+            print("Message : ", end='')
+            self.hexprint(self.m)
+        o2 = self.hash()
+        if pt:
+            print("Hash : ", end='')
+            self.hexprint(o2)
+        if not pt:
+            return o, o2
+
+    def makeinput(self):
+        m = bytearray(16)
+        for i in range(4):
+            m[i] = getrandbits(8)
+        m.extend(m)
+        self.m = m
+
+    def tweak(self):
+        # just change the last bit of the first byte of A and B
+        self.m[0] = self.m[0] ^ 0x01
+        self.m[16] = self.m[16] ^ 0x01
+
+    def change_B(self, o, o_i):
+        newb = self.xor(o, self.xor(o_i, self.m[16:]))
+        self.m[20:] = newb[4:]
+
+    def hexprint(self, bytearr):
+        print(" ".join(list(map(hex, bytearr))))
 
     def xor(self, A, B):
         return bytearray(a ^ b for (a, b) in zip(A, B))
@@ -27,13 +68,44 @@ class HashFinder:
             rb = b_now[:4]
             if i != self.t - 1:
                 a_next = self.h_round(rb, a_now)
-                b_next = self.h_round(self.int_lookup[i:i+4], b_now)
+                b_next = self.h_round(self.int_lookup[i:i+4], a_now)
                 a_now = a_next[:]
                 b_now = b_next[:]
             else:
                 a_t = self.h_round_prime(rb, a_now)
 
         return self.xor(a_t, self.xor(a0, b0))
+    def hash_print(self):
+        # initialization
+        a0 = self.m[:16]
+        b0 = self.m[16:]
+        a_now = a0[:]
+        b_now = b0[:]
+
+        # round loop
+        for i in range(self.t):
+            rb = b_now[:4]
+            if i != self.t - 1:
+                print(f"round {i}")
+                self.hexprint(rb)
+                self.hexprint(a_now)
+                self.hexprint(b_now)
+                a_next = self.h_round(rb, a_now)
+                b_next = self.h_round(self.int_lookup[i:i+4], a_now)
+                a_now = a_next[:]
+                b_now = b_next[:]
+            else:
+                print(f"round {i}")
+                self.hexprint(rb)
+                self.hexprint(a_now)
+                self.hexprint(b_now)
+                a_t = self.h_round_prime(rb, a_now)
+                self.hexprint(a_t)
+                print("result")
+                result = self.xor(a_t, self.xor(a0, b0))
+                self.hexprint(result)
+
+        return result
 
     def h_round(self, rb, X):
         Y = bytearray(16)
@@ -82,4 +154,24 @@ class HashFinder:
         return q
 
     def mixcol(self, q):
-        pass
+        y = bytearray(4)
+        y[0] = self.mult(q[0], 2) ^ self.mult(q[1], 3) ^ self.mult(q[2], 1) ^ self.mult(q[3], 1)
+        y[1] = self.mult(q[0], 1) ^ self.mult(q[1], 2) ^ self.mult(q[2], 3) ^ self.mult(q[3], 1)
+        y[2] = self.mult(q[0], 1) ^ self.mult(q[1], 1) ^ self.mult(q[2], 2) ^ self.mult(q[3], 3)
+        y[3] = self.mult(q[0], 3) ^ self.mult(q[1], 1) ^ self.mult(q[2], 1) ^ self.mult(q[3], 2)
+        return y
+
+    def mult(self, byte, num):
+        if num == 1:
+            return byte
+        elif num == 2:
+            return self.times(byte)
+        else:
+            return self.times(byte) ^ byte
+
+    def times(self, byte):
+        poly = 0x1b # 0001 1011
+        if byte & 0x80: # if 1st digit is 1
+            return ((byte << 1) ^ poly) & 0xff
+        else:
+            return byte << 1
